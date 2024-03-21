@@ -6,6 +6,7 @@ import cn.evole.onebot.mirai.core.session.BotSession;
 import cn.evole.onebot.mirai.util.ActionUtils;
 import cn.evole.onebot.sdk.action.ActionData;
 import cn.evole.onebot.sdk.event.meta.HeartbeatMetaEvent;
+import cn.evole.onebot.sdk.response.misc.MiraiResp;
 import cn.evole.onebot.sdk.util.json.GsonUtils;
 import com.google.gson.JsonObject;
 import org.java_websocket.WebSocket;
@@ -40,6 +41,11 @@ public class OneBotWSServer extends WebSocketServer{
     public void onOpen(WebSocket conn, ClientHandshake handshake) {
         OneBotMirai.logger.info(String.format("Bot: %s 正向Websocket服务端 / 成功连接", botSession.getBot().getId()));
 
+        // 连接成功时，上报一次心跳
+        var event = new HeartbeatMetaEvent();
+        event.setMetaEventType("heartbeat");
+        event.setSelfId(botSession.getBot().getId());
+        conn.send(GsonUtils.getGson().toJson(event));
     }
 
     @Override
