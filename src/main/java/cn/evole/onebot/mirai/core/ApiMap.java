@@ -29,6 +29,7 @@ import net.mamoe.mirai.LowLevelApi;
 import net.mamoe.mirai.Mirai;
 import net.mamoe.mirai.contact.Contact;
 import net.mamoe.mirai.contact.MemberPermission;
+import net.mamoe.mirai.contact.NormalMember;
 import net.mamoe.mirai.contact.PermissionDeniedException;
 import net.mamoe.mirai.contact.announcement.OfflineAnnouncement;
 import net.mamoe.mirai.event.events.BotInvitedJoinGroupRequestEvent;
@@ -41,7 +42,9 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Stream;
 
 import static cn.evole.onebot.mirai.util.ImgUtils.*;
 import static cn.evole.onebot.mirai.util.VoiceUtils.getCachedRecordFile;
@@ -697,7 +700,7 @@ public class ApiMap {
         }
     }
 
-    public ActionData<?> getGroupMemberList(JsonObject params) {
+    public ActionData<?> getGroupMemberList(JsonObject params) throws InterruptedException {
         val groupId = params.get("group_id").getAsLong();
         val groupMemberListData = new LinkedList<GroupMemberInfoResp>();
         val data = new ActionData<>();
@@ -705,10 +708,40 @@ public class ApiMap {
         AtomicBoolean isBotIncluded = new AtomicBoolean(false);
         val group = bot.getGroupOrFail(groupId);
         val members = group.getMembers();
-        members.forEach(member -> {
-            if (member.getId() == bot.getId()) isBotIncluded.set(true);
-            groupMemberListData.add(new MiraiGroupMemberInfoResp(member));
-        });
+        int size = members.size();
+        if (size > 100) {
+            // 分5份，多线程加速响应
+            int i = size / 5;
+            int i1 = size % 5;
+            CountDownLatch cdl = new CountDownLatch(i1 > 0 ? 6 : 5);
+            for (int j = 0; j < 5; j++) {
+                List<NormalMember> limit = members.stream().skip(j * i).limit(i).toList();
+                new Thread(() -> {
+                    limit.forEach(member -> {
+                        if (member.getId() == bot.getId()) isBotIncluded.set(true);
+                        groupMemberListData.add(new MiraiGroupMemberInfoResp(member));
+                    });
+                    cdl.countDown();
+                }).start();
+            }
+            if (i1 > 0) {
+                List<NormalMember> limit = members.stream().skip(5 * i).limit(i1).toList();
+                new Thread(() -> {
+                    limit.forEach(member -> {
+                        if (member.getId() == bot.getId()) isBotIncluded.set(true);
+                        groupMemberListData.add(new MiraiGroupMemberInfoResp(member));
+                    });
+                    cdl.countDown();
+                }).start();
+            }
+            cdl.await();
+        } else {
+            members.forEach(member -> {
+                if (member.getId() == bot.getId()) isBotIncluded.set(true);
+                groupMemberListData.add(new MiraiGroupMemberInfoResp(member));
+            });
+        }
+
         if (!isBotIncluded.get()) groupMemberListData.add(new MiraiGroupMemberInfoResp(group.getBotAsMember()));
         data.setData(groupMemberListData);
         data.setStatus("ok");
